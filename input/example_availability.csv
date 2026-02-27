@@ -1,0 +1,6 @@
+band_id,band_name,day,start,end,duration_minutes,weight,note,unavailable
+b001,The Comets,2026-01-10,11:40,15:30,20,1.2,opening mood,13:00-13:20
+b002,Blue Tape,2026-01-10,12:00,19:00,15,1.0,,
+b003,Night Owl,2026-01-10,14:00,18:30,10,1.5,late preferred,
+b004,Red Harbor,2026-01-10,11:40,18:00,20,0.9,,16:00-16:30
+b005,Silver Rain,2026-01-10,15:00,19:00,15,1.3,,

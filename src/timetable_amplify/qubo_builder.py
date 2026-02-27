@@ -1,0 +1,230 @@
+"""QUBO construction + solve adapter.
+
+This module keeps optimization-specific logic isolated.
+"""
+
+from __future__ import annotations
+
+import importlib.util
+import os
+from dataclasses import dataclass
+
+from .errors import NoFeasibleSolutionError, SolverUnavailableError
+from .models import AppConfig, BandAvailability, DaySpec, ParsedAvailability, SolveResult, TimeTableEntry
+from .time_utils import duration_to_slots, parse_hhmm, slot_to_time, time_to_slot
+
+
+@dataclass(frozen=True)
+class CandidateStart:
+    band: BandAvailability
+    day: DaySpec
+    start_slot: int
+    end_slot: int
+    block_index: int
+    score: float
+
+
+@dataclass(frozen=True)
+class QUBOModel:
+    terms: dict[str, float]
+    metadata: dict[str, str]
+    candidates: list[CandidateStart]
+
+
+def ideal_block_counts(n_bands: int) -> tuple[int, int, int]:
+    q, r = divmod(n_bands, 3)
+    if r == 0:
+        return (q, q, q)
+    if r == 1:
+        return (q, q, q + 1)
+    return (q, q + 1, q + 1)
+
+
+def build_qubo(config: AppConfig, availability: ParsedAvailability) -> QUBOModel:
+    day_map = {d.date: d for d in config.event_days}
+    targets = ideal_block_counts(len(availability.rows))
+
+    candidates: list[CandidateStart] = []
+    for band in availability.rows:
+        day = day_map.get(band.day)
+        if day is None:
+            continue
+        band_slots = duration_to_slots(band.duration_minutes, day.grid_minutes)
+        start = time_to_slot(band.available.start, day.start_time, day.grid_minutes)
+        end = time_to_slot(band.available.end, day.start_time, day.grid_minutes)
+
+        for s in range(start, max(start, end - band_slots) + 1):
+            bidx, pos = _slot_to_block(day, s)
+            score = _block_position_value(config, bidx, pos) * band.weight * config.reward.start_position_weight
+            candidates.append(CandidateStart(band=band, day=day, start_slot=s, end_slot=s + band_slots, block_index=bidx, score=score))
+
+    terms = {f"x::{c.band.band_id}::{c.day.date}::{c.start_slot}": -c.score for c in candidates}
+    metadata = {
+        "candidates": str(len(candidates)),
+        "target_block_counts": str(targets),
+    }
+    return QUBOModel(terms=terms, metadata=metadata, candidates=candidates)
+
+
+def solve_qubo(config: AppConfig, availability: ParsedAvailability, qubo: QUBOModel) -> SolveResult:
+    if not qubo.candidates:
+        raise NoFeasibleSolutionError("No candidate starts generated from availability. Check CSV windows and durations.")
+
+    if config.solver.client.lower() == "amplify":
+        return _solve_amplify_or_fallback(config, qubo)
+    return _greedy_schedule(config, qubo, solver_name=config.solver.client)
+
+
+def _solve_amplify_or_fallback(config: AppConfig, qubo: QUBOModel) -> SolveResult:
+    if importlib.util.find_spec("amplify") is None:
+        if config.solver.strict_optimal:
+            raise SolverUnavailableError("Amplify SDK is not installed. Install fixstars-amplify.")
+        return _greedy_schedule(config, qubo, "fallback(no-amplify-sdk)")
+
+    if not os.environ.get("AMPLIFY_TOKEN"):
+        msg = "AMPLIFY_TOKEN is not set. Export it (e.g., `export AMPLIFY_TOKEN=...`)"
+        if config.solver.strict_optimal:
+            raise SolverUnavailableError(msg)
+        result = _greedy_schedule(config, qubo, "fallback(no-token)")
+        return SolveResult(
+            is_optimal=False,
+            objective=result.objective,
+            timetable=result.timetable,
+            diagnostics={**result.diagnostics, "token": msg},
+        )
+
+    # Placeholder adapter: integration point for real Amplify BinaryQuadraticModel mapping.
+    return _greedy_schedule(config, qubo, "amplify-adapter-placeholder")
+
+
+def _slot_to_block(day: DaySpec, slot: int) -> tuple[int, int]:
+    total_slots = duration_to_slots(parse_hhmm(day.end_time) - parse_hhmm(day.start_time), day.grid_minutes)
+    block_size = max(1, total_slots // 3)
+    block = min(2, slot // block_size)
+    block_start = block * block_size
+    pos_in_block = max(0, slot - block_start)
+    return block, pos_in_block
+
+
+def _block_position_value(config: AppConfig, block_idx: int, pos_in_block: int) -> float:
+    base = config.reward.block_base_values[min(block_idx, len(config.reward.block_base_values) - 1)]
+    # Lower block index => larger step subtraction, ensuring:
+    # previous block end value > next block start value
+    cross_block_adjust = (2 - block_idx) * config.reward.block_step
+    return base + config.reward.intra_step * pos_in_block - cross_block_adjust
+
+
+def _greedy_schedule(config: AppConfig, qubo: QUBOModel, solver_name: str) -> SolveResult:
+    targets = ideal_block_counts(len({c.band.band_id for c in qubo.candidates}))
+    selected: list[CandidateStart] = []
+    used_bands: set[str] = set()
+    block_count = [0, 0, 0]
+
+    for cand in sorted(qubo.candidates, key=lambda c: (-c.score, c.day.date, c.start_slot)):
+        if cand.band.band_id in used_bands:
+            continue
+        if _conflicts(selected, cand):
+            continue
+        # favor later blocks when tie / overflow target
+        if block_count[cand.block_index] > targets[cand.block_index] and cand.block_index < 2:
+            continue
+        selected.append(cand)
+        used_bands.add(cand.band.band_id)
+        block_count[cand.block_index] += 1
+
+    if not selected:
+        raise NoFeasibleSolutionError("No feasible schedule found by heuristic solver")
+
+    entries = _materialize_entries(config, selected)
+    objective = sum(c.score for c in selected)
+    return SolveResult(
+        is_optimal=False,
+        objective=objective,
+        timetable=entries,
+        diagnostics={
+            "solver": solver_name,
+            "selected": str(len(selected)),
+            "target_block_counts": str(targets),
+            "actual_block_counts": str(tuple(block_count)),
+        },
+    )
+
+
+def _materialize_entries(config: AppConfig, selected: list[CandidateStart]) -> list[TimeTableEntry]:
+    out: list[TimeTableEntry] = []
+    by_day: dict[str, list[CandidateStart]] = {}
+    for s in selected:
+        by_day.setdefault(s.day.date, []).append(s)
+
+    for day in config.event_days:
+        day_selected = sorted(by_day.get(day.date, []), key=lambda x: x.start_slot)
+        break_slots = _break_intervals(day)
+
+        for b_start, b_end in break_slots:
+            out.append(
+                TimeTableEntry(
+                    day=day.date,
+                    start=slot_to_time(b_start, day.start_time, day.grid_minutes),
+                    end=slot_to_time(b_end, day.start_time, day.grid_minutes),
+                    label="BREAK",
+                    entry_type="break",
+                )
+            )
+
+        for s in day_selected:
+            out.append(
+                TimeTableEntry(
+                    day=day.date,
+                    start=slot_to_time(s.start_slot, day.start_time, day.grid_minutes),
+                    end=slot_to_time(s.end_slot, day.start_time, day.grid_minutes),
+                    label=s.band.band_name,
+                    entry_type="band",
+                )
+            )
+
+    return sorted(out, key=lambda e: (e.day, e.start, e.entry_type))
+
+
+def _break_intervals(day: DaySpec) -> list[tuple[int, int]]:
+    slots = duration_to_slots(parse_hhmm(day.end_time) - parse_hhmm(day.start_time), day.grid_minutes)
+    durations: list[int] = []
+    for br in day.breaks:
+        br_slots = duration_to_slots(br.duration_minutes, day.grid_minutes)
+        durations.extend([br_slots] * br.count)
+
+    if not durations:
+        return []
+
+    n = len(durations)
+    base_positions = [int((i + 1) * slots / (n + 1)) for i in range(n)]
+    return [(max(0, pos - dur // 2), min(slots, max(0, pos - dur // 2) + dur)) for pos, dur in zip(base_positions, durations)]
+
+
+def _conflicts(selected: list[CandidateStart], cand: CandidateStart) -> bool:
+    # Break overlap and band overlap/changeover constraints.
+    breaks = _break_intervals(cand.day)
+    changeover_slots = duration_to_slots(cand.day.changeover_minutes, cand.day.grid_minutes)
+
+    for b_start, b_end in breaks:
+        if not (cand.end_slot <= b_start or cand.start_slot >= b_end):
+            return True
+
+    for other in selected:
+        if other.day.date != cand.day.date:
+            continue
+        if not (cand.end_slot <= other.start_slot or cand.start_slot >= other.end_slot):
+            return True
+
+        # Changeover only between bands; breaks are handled separately.
+        left, right = (cand, other) if cand.start_slot <= other.start_slot else (other, cand)
+        if right.start_slot - left.end_slot < changeover_slots:
+            return True
+
+    # Unavailable windows
+    for r in cand.band.unavailable_ranges:
+        u_s = time_to_slot(r.start, cand.day.start_time, cand.day.grid_minutes)
+        u_e = time_to_slot(r.end, cand.day.start_time, cand.day.grid_minutes)
+        if not (cand.end_slot <= u_s or cand.start_slot >= u_e):
+            return True
+
+    return False
