@@ -5,7 +5,12 @@
       "start_time": "11:40",
       "end_time": "19:00",
       "grid_minutes": 5,
-      "breaks": [{ "count": 2, "duration_minutes": 30 }],
+      "breaks": [
+        {
+          "count": 2,
+          "duration_minutes": 30
+        }
+      ],
       "changeover_minutes": 15,
       "allow_idle_edges": true
     },
@@ -14,14 +19,27 @@
       "start_time": "11:40",
       "end_time": "19:00",
       "grid_minutes": 5,
-      "breaks": [{ "count": 2, "duration_minutes": 30 }],
+      "breaks": [
+        {
+          "count": 2,
+          "duration_minutes": 30
+        }
+      ],
       "changeover_minutes": 15,
       "allow_idle_edges": true
     }
   ],
-  "allowed_durations_minutes": [10, 15, 20],
+  "allowed_durations_minutes": [
+    10,
+    15,
+    20
+  ],
   "reward": {
-    "block_base_values": [1.0, 2.0, 3.0],
+    "block_base_values": [
+      1.0,
+      2.0,
+      3.0
+    ],
     "block_step": 0.2,
     "intra_step": 0.05,
     "start_position_weight": 1.0,
@@ -42,9 +60,9 @@
     "strict_optimal": false
   },
   "io": {
-    "availability_csv_path": "input/example_multiday_availability.csv",
     "output_dir": "output",
-    "output_basename": "timetable_multiday"
+    "output_basename": "timetable_multiday",
+    "availability_editable_path": "input/example_multiday_availability_editable.json"
   },
   "logging": {
     "level": "INFO",

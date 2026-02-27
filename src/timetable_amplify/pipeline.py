@@ -19,7 +19,7 @@ def run_pipeline(config_path: str) -> tuple[SolveResult, dict[str, str]]:
     config = load_config(config_path)
     logger.info("Loaded config from %s", config_path)
 
-    parsed = parse_availability_csv(config.io.availability_csv_path)
+    parsed = parse_availability_csv(config.io.availability_editable_path)
     for warning in parsed.warnings:
         logger.warning("CSV warning: %s", warning)
 

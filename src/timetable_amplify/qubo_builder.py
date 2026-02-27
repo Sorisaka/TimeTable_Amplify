@@ -42,6 +42,7 @@ def ideal_block_counts(n_bands: int) -> tuple[int, int, int]:
 
 def build_qubo(config: AppConfig, availability: ParsedAvailability) -> QUBOModel:
     day_map = {d.date: d for d in config.event_days}
+    day_map.update({str(idx): d for idx, d in enumerate(config.event_days, start=1)})
     targets = ideal_block_counts(len(availability.rows))
 
     candidates: list[CandidateStart] = []

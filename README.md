@@ -2,7 +2,7 @@
 
 まず最初に編集する場所（利用者向け）:
 1. `configs/default_config.json`（日程・休憩・転換・重み）
-2. `input/example_availability.csv`（出演可能時間）
+2. `input/example_availability_editable.json`（出演可能時間・編集用中間ファイル）
 3. 必要なら `src/timetable_amplify/qubo_builder.py`（報酬・制約ロジック）
 
 ## 1. プロジェクト概要
@@ -33,10 +33,11 @@ TimeTable_Amplify/
 │   ├── default_config.json
 │   └── multiday_config.json
 ├── input/
-│   ├── example_availability.csv
-│   ├── example_multiday_availability.csv
-│   ├── invalid_missing_column.csv
-│   └── invalid_time_format.csv
+│   ├── example_availability_editable.json
+│   └── example_multiday_availability_editable.json
+├── csv_example/
+│   ├── 8月ライブ出演可能時間フォーム（回答） - 一覧.csv
+│   └── 二入卒業ライブ_出演可能時間フォーム（回答） - 一覧.csv
 ├── tests/
 │   ├── test_failure_modes.py
 │   └── test_self_check.py
@@ -81,9 +82,9 @@ python -m timetable_amplify.main --config configs/default_config.json --debug
 ```
 
 ## 8. サンプル入力
-- `input/example_availability.csv`: 単日サンプル
-- `input/example_multiday_availability.csv`: 複数日サンプル
-- `input/invalid_*.csv`: 失敗モード検証用
+- `input/example_availability_editable.json`: 単日サンプル（中間ファイル）
+- `input/example_multiday_availability_editable.json`: 複数日サンプル（中間ファイル）
+- `csv_example/*.csv`: Googleフォーム由来の元CSVサンプル
 
 ## 9. 出力ファイル説明
 - `output/*.csv`: 日時・ラベル一覧
@@ -101,17 +102,33 @@ python -m timetable_amplify.main --config configs/default_config.json --debug
 - ブロック人数均等化重み: `reward.balance_penalty`（将来の厳密QUBO強化で利用）
 - 目的関数/制約重み: `reward.*`, `penalties.*`
 
-## 11. 出演可能時間 CSV 仕様
-### 現時点仕様
-必須列: `band_id,band_name,day,start,end,duration_minutes`  
-任意列: `weight,note,unavailable`
+## 11. 出演可能時間の取り込み仕様（CSV -> 中間ファイル）
+### 運用フロー
+1. Googleフォーム形式CSVをCLIで読み込んで中間ファイルJSONを生成
+2. 生成されたJSONを人間が手編集（備考の反映や overrides 追記）
+3. 最適化はJSONのみを参照（元CSVは直接読まない）
 
-`unavailable` は `HH:MM-HH:MM;HH:MM-HH:MM` 形式。
+```bash
+python -m timetable_amplify.main --generate-editable-from-csv "csv_example/8月ライブ出演可能時間フォーム（回答） - 一覧.csv" --editable-out input/generated_availability_editable.json
+```
 
-### 今後の拡張予定
-- 曜日/日付混在表現
-- 複数出演可能窓の厳密定義
-- 日跨ぎイベント対応
+### 中間ファイル（編集対象）
+- `schema_version`
+- `generated_from`
+- `grid_minutes`
+- `days[]`: day番号/ラベル/観測時台
+- `bands[]`
+  - `name`
+  - `slot_minutes`
+  - `availability_by_day_hour`（True/False）
+  - `notes_by_day`（備考原文）
+  - `overrides`（例: `[{"day": 1, "allow_until": "14:30"}]`）
+
+### CSV値の正規化ルール
+- `出演可` => `true`
+- `出演不可` => `false`
+- 空欄/その他 => warning を出して `false` 扱い
+- `出演枠` は `15分枠` のような文字列から数値抽出
 
 ## 12. エラー時の確認ポイント
 1. 設定ファイルが存在するか
