@@ -99,6 +99,8 @@ def build_qubo(config: AppConfig, availability: ParsedAvailability) -> QUBOModel
                 if right.start_slot - left.end_slot < changeover_slots:
                     _add_quadratic(quadratic, i, j, config.penalties.changeover)
 
+    balance_pair_terms = _add_block_balance_penalty(config, candidates, quadratic)
+
     # Break/unavailable penalties as linear terms.
     for idx, cand in enumerate(candidates):
         if _conflicts_break_or_unavailable(cand):
@@ -108,6 +110,8 @@ def build_qubo(config: AppConfig, availability: ParsedAvailability) -> QUBOModel
     metadata = {
         "candidates": str(len(candidates)),
         "target_block_counts": str(targets),
+        "balance_pair_terms": str(balance_pair_terms),
+        "balance_penalty": str(config.reward.balance_penalty),
     }
     return QUBOModel(
         terms=terms,
@@ -117,6 +121,38 @@ def build_qubo(config: AppConfig, availability: ParsedAvailability) -> QUBOModel
         quadratic=quadratic,
         constant=constant,
     )
+
+
+def _add_block_balance_penalty(
+    config: AppConfig,
+    candidates: list[CandidateStart],
+    quadratic: dict[tuple[int, int], float],
+) -> int:
+    """Add block-balance pair terms grouped by (day, block).
+
+    Objective term: lambda * sum_{day, block} C_{day,block}^2.
+    This implementation adds only pair terms (2 * lambda * x_i * x_j) for
+    different bands in the same (day, block), which is enough to encourage
+    balanced assignment under per-band one-hot constraints.
+    """
+
+    lam = config.reward.balance_penalty
+    if lam <= 0:
+        return 0
+
+    by_day_block: dict[tuple[str, int], list[int]] = {}
+    for idx, cand in enumerate(candidates):
+        by_day_block.setdefault((cand.day.date, cand.block_index), []).append(idx)
+
+    pair_count = 0
+    for indices in by_day_block.values():
+        for i, j in combinations(indices, 2):
+            if candidates[i].band.band_id == candidates[j].band.band_id:
+                continue
+            _add_quadratic(quadratic, i, j, 2.0 * lam)
+            pair_count += 1
+
+    return pair_count
 
 
 def solve_qubo(config: AppConfig, availability: ParsedAvailability, qubo: QUBOModel) -> SolveResult:

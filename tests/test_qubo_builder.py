@@ -1,3 +1,4 @@
+from dataclasses import replace
 from types import SimpleNamespace
 
 import pytest
@@ -41,6 +42,36 @@ class _FakeValues:
 
     def __getitem__(self, key: str) -> object:
         return self._mapping[key]
+
+
+
+
+def test_build_qubo_applies_balance_penalty_pair_terms() -> None:
+    cfg = load_config("configs/default_config.json")
+    parsed = parse_availability_csv(cfg.io.availability_editable_path, cfg.io.priority_json_path)
+
+    cfg_zero = replace(cfg, reward=replace(cfg.reward, balance_penalty=0.0))
+    cfg_balanced = replace(cfg, reward=replace(cfg.reward, balance_penalty=5.0))
+
+    qubo_zero = build_qubo(cfg_zero, parsed)
+    qubo_balanced = build_qubo(cfg_balanced, parsed)
+
+    assert qubo_zero.metadata["balance_pair_terms"] == "0"
+    assert qubo_balanced.metadata["balance_pair_terms"] != "0"
+
+    by_pair_expected_delta: dict[tuple[int, int], float] = {}
+    for i, left in enumerate(qubo_balanced.candidates):
+        for j in range(i + 1, len(qubo_balanced.candidates)):
+            right = qubo_balanced.candidates[j]
+            if left.band.band_id == right.band.band_id:
+                continue
+            if left.day.date == right.day.date and left.block_index == right.block_index:
+                by_pair_expected_delta[(i, j)] = 10.0
+
+    for pair, expected_delta in by_pair_expected_delta.items():
+        before = qubo_zero.quadratic.get(pair, 0.0)
+        after = qubo_balanced.quadratic.get(pair, 0.0)
+        assert after - before == pytest.approx(expected_delta)
 
 
 def test_decode_solution_values_handles_poly_assignments() -> None:
