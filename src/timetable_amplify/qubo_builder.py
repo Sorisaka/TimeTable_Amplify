@@ -53,6 +53,7 @@ def build_qubo(config: AppConfig, availability: ParsedAvailability) -> QUBOModel
     targets = ideal_block_counts(len(availability.rows))
 
     candidates: list[CandidateStart] = []
+    clipped_rows_by_day: dict[str, int] = {}
     for band in availability.rows:
         day = day_map.get(band.day)
         if day is None:
@@ -65,15 +66,7 @@ def build_qubo(config: AppConfig, availability: ParsedAvailability) -> QUBOModel
         end = min(total_slots, raw_end)
 
         if start != raw_start or end != raw_end:
-            logger.warning(
-                "Band '%s' day %s availability %s-%s exceeds config window %s-%s; using config window",
-                band.band_name,
-                day.date,
-                band.available.start,
-                band.available.end,
-                day.start_time,
-                day.end_time,
-            )
+            clipped_rows_by_day[day.date] = clipped_rows_by_day.get(day.date, 0) + 1
 
         if start >= end:
             logger.warning(
@@ -91,6 +84,14 @@ def build_qubo(config: AppConfig, availability: ParsedAvailability) -> QUBOModel
             bidx, pos = _slot_to_block(day, s)
             score = _block_position_value(config, bidx, pos) * band.weight * config.reward.start_position_weight
             candidates.append(CandidateStart(band=band, day=day, start_slot=s, end_slot=s + band_slots, block_index=bidx, score=score))
+
+    if clipped_rows_by_day:
+        details = ", ".join(f"{day}({count})" for day, count in sorted(clipped_rows_by_day.items()))
+        logger.warning(
+            "CSV availability exceeded config time window and was clipped for %d band/day rows: %s",
+            sum(clipped_rows_by_day.values()),
+            details,
+        )
 
     linear = [-c.score for c in candidates]
     quadratic: dict[tuple[int, int], float] = {}

@@ -30,7 +30,9 @@ def test_build_qubo_prioritizes_config_time_window_and_logs_warning(caplog: pyte
     with caplog.at_level("WARNING"):
         qubo = build_qubo(narrowed_cfg, parsed)
 
-    assert "using config window" in caplog.text
+    assert "was clipped" in caplog.text
+    clipped_logs = [r for r in caplog.records if "was clipped" in r.message]
+    assert len(clipped_logs) == 1
     total_slots = (15 * 60 + 30 - (12 * 60 + 30)) // narrowed_day.grid_minutes
     for cand in qubo.candidates:
         assert cand.start_slot >= 0
