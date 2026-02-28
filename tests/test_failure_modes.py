@@ -37,7 +37,7 @@ def test_config_type_mismatch(tmp_path: Path) -> None:
         },
         "penalties": {"overlap": 1, "changeover": 1, "out_of_window": 1, "unavailable": 1},
         "solver": {"client": "amplify", "timeout_ms": 1, "num_outputs": 1, "strict_optimal": False},
-        "io": {"availability_csv_path": "x", "output_dir": "y", "output_basename": "z"},
+        "io": {"availability_editable_path": "x", "output_dir": "y", "output_basename": "z"},
         "logging": {"level": "INFO", "json": False},
     }
     p = tmp_path / "cfg.json"
@@ -46,9 +46,33 @@ def test_config_type_mismatch(tmp_path: Path) -> None:
         load_config(str(p))
 
 
-def test_invalid_time_csv(tmp_path: Path) -> None:
-    p = tmp_path / "bad.csv"
-    _write(p, "band_id,band_name,day,start,end,duration_minutes\nb1,A,2026-01-10,xx:10,13:00,15\n")
+
+
+def test_load_config_with_external_coefficients_and_priority_path() -> None:
+    cfg = load_config("configs/default_config.json")
+    assert cfg.io.priority_json_path == "input/priority.json"
+    assert cfg.reward.block_step == 0.2
+    assert cfg.penalties.overlap == 100.0
+
+
+def test_missing_coefficients_file_raises(tmp_path: Path) -> None:
+    cfg = json.loads(Path("configs/default_config.json").read_text(encoding="utf-8"))
+    cfg["coefficients_file_path"] = "configs/not_found_coeff.json"
+    p = tmp_path / "cfg.json"
+    _write(p, json.dumps(cfg))
+    with pytest.raises(ConfigError):
+        load_config(str(p))
+
+def test_invalid_editable_json(tmp_path: Path) -> None:
+    p = tmp_path / "bad.json"
+    _write(p, "not-json")
+    with pytest.raises(CSVFormatError):
+        parse_availability_csv(str(p))
+
+
+def test_invalid_editable_schema(tmp_path: Path) -> None:
+    p = tmp_path / "bad.json"
+    _write(p, json.dumps({"schema_version": 1, "bands": []}))
     with pytest.raises(CSVFormatError):
         parse_availability_csv(str(p))
 
@@ -81,25 +105,6 @@ def test_zero_changeover_or_break_invalid(tmp_path: Path) -> None:
         load_config(str(p))
 
 
-def test_empty_band_rows(tmp_path: Path) -> None:
-    p = tmp_path / "empty.csv"
-    _write(p, "band_id,band_name,day,start,end,duration_minutes\n")
-    with pytest.raises(CSVFormatError):
-        parse_availability_csv(str(p))
-
-
-def test_csv_missing_columns() -> None:
-    with pytest.raises(CSVFormatError):
-        parse_availability_csv("input/invalid_missing_column.csv")
-
-
-def test_missing_band_id(tmp_path: Path) -> None:
-    p = tmp_path / "bad.csv"
-    _write(p, "band_id,band_name,day,start,end,duration_minutes\n,A,2026-01-10,12:00,13:00,15\n")
-    with pytest.raises(CSVFormatError):
-        parse_availability_csv(str(p))
-
-
 def test_output_dir_creation_failure(tmp_path: Path) -> None:
     fake_dir = tmp_path / "not_a_dir"
     fake_dir.write_text("file", encoding="utf-8")
@@ -115,11 +120,10 @@ def test_pipeline_runs_without_amplify_token(monkeypatch: pytest.MonkeyPatch) ->
 
 
 def test_solver_empty_result_handled() -> None:
-    # Empty candidates path is treated as no-feasible-solution in solver.
     from timetable_amplify.qubo_builder import QUBOModel, solve_qubo
     from timetable_amplify.config import load_config
-    from timetable_amplify.models import ParsedAvailability
     from timetable_amplify.errors import NoFeasibleSolutionError
+    from timetable_amplify.models import ParsedAvailability
 
     cfg = load_config("configs/default_config.json")
     with pytest.raises(NoFeasibleSolutionError):

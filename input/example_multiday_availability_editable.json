@@ -1,0 +1,86 @@
+{
+  "schema_version": 1,
+  "generated_from": "example_manual_multiday",
+  "grid_minutes": 5,
+  "days": [
+    {
+      "day": 1,
+      "label": "1日目",
+      "hours": [
+        12,
+        13,
+        14,
+        15,
+        16
+      ]
+    },
+    {
+      "day": 2,
+      "label": "2日目",
+      "hours": [
+        12,
+        13,
+        14,
+        15,
+        16
+      ]
+    }
+  ],
+  "bands": [
+    {
+      "name": "Band M1",
+      "slot_minutes": 15,
+      "availability_by_day_hour": {
+        "1": {
+          "12": true,
+          "13": false,
+          "14": true,
+          "15": true,
+          "16": false
+        },
+        "2": {
+          "12": true,
+          "13": true,
+          "14": true,
+          "15": false,
+          "16": false
+        }
+      },
+      "notes_by_day": {
+        "1": "",
+        "2": ""
+      },
+      "overrides": []
+    },
+    {
+      "name": "Band M2",
+      "slot_minutes": 10,
+      "availability_by_day_hour": {
+        "1": {
+          "12": true,
+          "13": true,
+          "14": true,
+          "15": false,
+          "16": false
+        },
+        "2": {
+          "12": true,
+          "13": true,
+          "14": false,
+          "15": false,
+          "16": false
+        }
+      },
+      "notes_by_day": {
+        "1": "",
+        "2": "2日目は13:30まで"
+      },
+      "overrides": [
+        {
+          "day": 2,
+          "allow_until": "13:30"
+        }
+      ]
+    }
+  ]
+}

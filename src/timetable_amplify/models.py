@@ -55,9 +55,28 @@ class SolverConfig:
 
 @dataclass(frozen=True)
 class IOConfig:
-    availability_csv_path: str
+    availability_editable_path: str
     output_dir: str
     output_basename: str
+    priority_json_path: str | None = None
+
+
+@dataclass(frozen=True)
+class RawBandAvailability:
+    name: str
+    slot_minutes: int
+    availability_by_day_hour: dict[int, dict[int, bool]]
+    notes_by_day: dict[int, str]
+    overrides: list[dict[str, object]]
+
+
+@dataclass(frozen=True)
+class ParsedAvailabilityRaw:
+    generated_from: str
+    grid_minutes: int
+    days: dict[int, list[int]]
+    bands: list[RawBandAvailability]
+    warnings: list[str]
 
 
 @dataclass(frozen=True)

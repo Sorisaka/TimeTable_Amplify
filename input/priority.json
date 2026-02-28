@@ -1,0 +1,9 @@
+{
+  "version": 1,
+  "bands": [
+    {"band": "Band A", "priority": 3},
+    {"band": "Band B", "priority": 3},
+    {"band": "Band M1", "priority": 3},
+    {"band": "Band M2", "priority": 3}
+  ]
+}

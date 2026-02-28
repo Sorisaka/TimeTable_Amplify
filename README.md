@@ -2,7 +2,7 @@
 
 まず最初に編集する場所（利用者向け）:
 1. `configs/default_config.json`（日程・休憩・転換・重み）
-2. `input/example_availability.csv`（出演可能時間）
+2. `input/example_availability_editable.json`（出演可能時間・編集用中間ファイル）
 3. 必要なら `src/timetable_amplify/qubo_builder.py`（報酬・制約ロジック）
 
 ## 1. プロジェクト概要
@@ -31,12 +31,16 @@ TimeTable_Amplify/
 ├── pyproject.toml
 ├── configs/
 │   ├── default_config.json
-│   └── multiday_config.json
+│   ├── multiday_config.json
+│   ├── qubo_coefficients_default.json
+│   └── qubo_coefficients_multiday.json
 ├── input/
-│   ├── example_availability.csv
-│   ├── example_multiday_availability.csv
-│   ├── invalid_missing_column.csv
-│   └── invalid_time_format.csv
+│   ├── example_availability_editable.json
+│   ├── example_multiday_availability_editable.json
+│   └── priority.json
+├── csv_example/
+│   ├── 8月ライブ出演可能時間フォーム（回答） - 一覧.csv
+│   └── 二入卒業ライブ_出演可能時間フォーム（回答） - 一覧.csv
 ├── tests/
 │   ├── test_failure_modes.py
 │   └── test_self_check.py
@@ -81,9 +85,9 @@ python -m timetable_amplify.main --config configs/default_config.json --debug
 ```
 
 ## 8. サンプル入力
-- `input/example_availability.csv`: 単日サンプル
-- `input/example_multiday_availability.csv`: 複数日サンプル
-- `input/invalid_*.csv`: 失敗モード検証用
+- `input/example_availability_editable.json`: 単日サンプル（中間ファイル）
+- `input/example_multiday_availability_editable.json`: 複数日サンプル（中間ファイル）
+- `csv_example/*.csv`: Googleフォーム由来の元CSVサンプル
 
 ## 9. 出力ファイル説明
 - `output/*.csv`: 日時・ラベル一覧
@@ -99,20 +103,60 @@ python -m timetable_amplify.main --config configs/default_config.json --debug
 - 転換長: `event_days[].changeover_minutes`
 - ブロック価値傾斜: `reward.block_base_values`, `reward.block_step`, `reward.intra_step`
 - ブロック人数均等化重み: `reward.balance_penalty`（将来の厳密QUBO強化で利用）
-- 目的関数/制約重み: `reward.*`, `penalties.*`
+- 目的関数/制約重み: `configs/qubo_coefficients_*.json` の `reward.*`, `penalties.*`
+- priority JSONパス: `io.priority_json_path`（未指定時は editable.json 同ディレクトリの `priority.json` を探索）
+- 係数ファイルパス: `coefficients_file_path`
 
-## 11. 出演可能時間 CSV 仕様
-### 現時点仕様
-必須列: `band_id,band_name,day,start,end,duration_minutes`  
-任意列: `weight,note,unavailable`
+## 11. 出演可能時間の取り込み仕様（CSV -> 中間ファイル）
+### 役割分離
+- `editable.json`: 出演可否・出演枠・備考・overrides（可用性中心）
+- `priority.json`: 「良い位置に置きたい度（優先度）」を管理
 
-`unavailable` は `HH:MM-HH:MM;HH:MM-HH:MM` 形式。
+### 運用フロー
+1. Googleフォーム形式CSVをCLIで読み込み、`editable.json` を生成（同時に `priority.json` も生成）
+2. `editable.json` の可否や備考由来の `overrides` を手編集
+3. `priority.json` の `priority`（1..5）や `weight` を手編集
+4. solver 実行時に `priority.json` が `BandAvailability.weight` へ反映される
 
-### 今後の拡張予定
-- 曜日/日付混在表現
-- 複数出演可能窓の厳密定義
-- 日跨ぎイベント対応
+```bash
+# CSV -> editable + priority 生成
+python -m timetable_amplify.main \
+  --generate-editable-from-csv "csv_example/8月ライブ出演可能時間フォーム（回答） - 一覧.csv" \
+  --editable-out input/generated_availability_editable.json
 
+# priority.json の出力先/上書き制御
+python -m timetable_amplify.main \
+  --generate-editable-from-csv "csv_example/8月ライブ出演可能時間フォーム（回答） - 一覧.csv" \
+  --editable-out input/generated_availability_editable.json \
+  --priority-json input/priority.json \
+  --overwrite-priority
+
+# solver 実行（priority.json を明示指定）
+PYTHONPATH=src python -m timetable_amplify.main --config configs/default_config.json --priority-json input/priority.json
+```
+
+`config` 側でも `io.priority_json_path` を指定できます。CLI `--priority-json` はその上書きです。
+
+### priority.json スキーマ
+```json
+{
+  "version": 1,
+  "bands": [
+    {"band": "BandA", "priority": 5, "weight": 1.5, "notes": "絶対良い位置"},
+    {"band": "BandB", "priority": 3},
+    {"band": "BandC", "priority": 1, "notes": "どこでもOK"}
+  ]
+}
+```
+- `weight` があれば `priority` より優先。
+- `weight` がない場合の変換: `1->0.6, 2->0.8, 3->1.0, 4->1.2, 5->1.5`
+- `priority.json` が無い/不正/欠損バンドは `weight=1.0` で継続（warningのみ）。
+
+### CSV値の正規化ルール
+- `出演可` => `true`
+- `出演不可` => `false`
+- 空欄/その他 => warning を出して `false` 扱い
+- `出演枠` は `15分枠` のような文字列から数値抽出
 ## 12. エラー時の確認ポイント
 1. 設定ファイルが存在するか
 2. JSON 型が正しいか

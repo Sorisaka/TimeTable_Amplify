@@ -15,11 +15,12 @@ from .validator import validate_timetable
 logger = logging.getLogger(__name__)
 
 
-def run_pipeline(config_path: str) -> tuple[SolveResult, dict[str, str]]:
+def run_pipeline(config_path: str, priority_json_path: str | None = None) -> tuple[SolveResult, dict[str, str]]:
     config = load_config(config_path)
     logger.info("Loaded config from %s", config_path)
 
-    parsed = parse_availability_csv(config.io.availability_csv_path)
+    resolved_priority_path = priority_json_path if priority_json_path is not None else config.io.priority_json_path
+    parsed = parse_availability_csv(config.io.availability_editable_path, priority_json_path=resolved_priority_path)
     for warning in parsed.warnings:
         logger.warning("CSV warning: %s", warning)
 

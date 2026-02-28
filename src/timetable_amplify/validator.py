@@ -10,7 +10,12 @@ from .time_utils import time_to_slot
 def validate_timetable(config: AppConfig, parsed: ParsedAvailability, entries: list[TimeTableEntry]) -> ValidationReport:
     errors: list[str] = []
     day_map = {d.date: d for d in config.event_days}
-    band_map = {b.band_name: b for b in parsed.rows}
+    day_index_map = {str(i): d.date for i, d in enumerate(config.event_days, start=1)}
+    band_map = {}
+    for b in parsed.rows:
+        band_map[(b.band_name, b.day)] = b
+        if b.day in day_index_map:
+            band_map[(b.band_name, day_index_map[b.day])] = b
 
     entries_by_day: dict[str, list[TimeTableEntry]] = {}
     for e in entries:
@@ -34,9 +39,9 @@ def validate_timetable(config: AppConfig, parsed: ParsedAvailability, entries: l
                 errors.append(f"Time out-of-range or invalid interval: {e}")
 
             if e.entry_type == "band":
-                band = band_map.get(e.label)
+                band = band_map.get((e.label, day))
                 if band is None:
-                    errors.append(f"Output band not in input CSV: {e.label}")
+                    errors.append(f"Output band not in input CSV/day: {e.label} ({day})")
                 else:
                     if not (band.available.start <= e.start and e.end <= band.available.end):
                         errors.append(f"Band scheduled outside availability: {e.label}")
