@@ -172,8 +172,14 @@ def _solve_amplify_or_fallback(config: AppConfig, qubo: QUBOModel) -> SolveResul
             raise SolverUnavailableError(f"Amplify solve failed: {exc}") from exc
         return _greedy_schedule(config, qubo, "fallback(amplify-solve-error)")
 
-    assignments = _decode_solution_values(result, x)
-    selected = [cand for idx, cand in enumerate(qubo.candidates) if assignments.get(idx, 0) >= 0.5]
+    try:
+        assignments = _decode_solution_values(result, x)
+    except ValueError as exc:
+        if config.solver.strict_optimal:
+            raise SolverUnavailableError(f"Amplify solution decode failed: {exc}") from exc
+        return _greedy_schedule(config, qubo, "fallback(amplify-decode-error)")
+
+    selected = [cand for idx, cand in enumerate(qubo.candidates) if assignments.get(idx, 0.0) >= 0.5]
     if not selected:
         if config.solver.strict_optimal:
             raise NoFeasibleSolutionError("Amplify returned an empty candidate selection")
@@ -207,13 +213,69 @@ def _decode_solution_values(result: object, variable_array: object) -> dict[int,
         return {}
 
     if hasattr(values, "evaluate"):
-        evaluated = values.evaluate(variable_array)
-        return {i: float(v) for i, v in enumerate(evaluated)}
+        try:
+            evaluated = values.evaluate(variable_array)
+            return {i: _coerce_numeric_value(v) for i, v in enumerate(evaluated)}
+        except Exception:
+            # Fallback to per-variable extraction for SDK variants that return Poly objects.
+            pass
+
+    decoded: dict[int, float] = {}
+    for i, var in enumerate(variable_array):
+        raw = None
+        try:
+            raw = values[var]
+        except Exception:
+            if hasattr(values, "get"):
+                try:
+                    raw = values.get(var)
+                except Exception:
+                    raw = None
+        if raw is not None:
+            decoded[i] = _coerce_numeric_value(raw)
+    if decoded:
+        return decoded
 
     if isinstance(values, dict):
-        return {int(k): float(v) for k, v in values.items()}
+        out: dict[int, float] = {}
+        for k, v in values.items():
+            try:
+                idx = int(k)
+            except Exception:
+                continue
+            out[idx] = _coerce_numeric_value(v)
+        return out
 
-    return {i: float(v) for i, v in enumerate(values)}
+    return {i: _coerce_numeric_value(v) for i, v in enumerate(values)}
+
+
+def _coerce_numeric_value(value: object) -> float:
+    """Convert Amplify value/Poly-like objects to float when they are constants."""
+    if isinstance(value, bool):
+        return 1.0 if value else 0.0
+    if isinstance(value, (int, float)):
+        return float(value)
+
+    try:
+        return float(value)
+    except Exception:
+        pass
+
+    is_constant_attr = getattr(value, "is_constant", None)
+    if is_constant_attr is not None:
+        try:
+            is_constant = bool(is_constant_attr() if callable(is_constant_attr) else is_constant_attr)
+        except Exception:
+            is_constant = False
+        if is_constant:
+            const = getattr(value, "constant", None)
+            if const is not None:
+                try:
+                    return float(const() if callable(const) else const)
+                except Exception:
+                    pass
+
+    raise ValueError(f"Could not decode non-constant assignment value: {value!r}")
 
 
 def _add_quadratic(quadratic: dict[tuple[int, int], float], i: int, j: int, coeff: float) -> None:
