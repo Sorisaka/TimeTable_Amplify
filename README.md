@@ -34,7 +34,8 @@ TimeTable_Amplify/
 │   └── multiday_config.json
 ├── input/
 │   ├── example_availability_editable.json
-│   └── example_multiday_availability_editable.json
+│   ├── example_multiday_availability_editable.json
+│   └── priority.json
 ├── csv_example/
 │   ├── 8月ライブ出演可能時間フォーム（回答） - 一覧.csv
 │   └── 二入卒業ライブ_出演可能時間フォーム（回答） - 一覧.csv
@@ -103,33 +104,53 @@ python -m timetable_amplify.main --config configs/default_config.json --debug
 - 目的関数/制約重み: `reward.*`, `penalties.*`
 
 ## 11. 出演可能時間の取り込み仕様（CSV -> 中間ファイル）
+### 役割分離
+- `editable.json`: 出演可否・出演枠・備考・overrides（可用性中心）
+- `priority.json`: 「良い位置に置きたい度（優先度）」を管理
+
 ### 運用フロー
-1. Googleフォーム形式CSVをCLIで読み込んで中間ファイルJSONを生成
-2. 生成されたJSONを人間が手編集（備考の反映や overrides 追記）
-3. 最適化はJSONのみを参照（元CSVは直接読まない）
+1. Googleフォーム形式CSVをCLIで読み込み、`editable.json` を生成（同時に `priority.json` も生成）
+2. `editable.json` の可否や備考由来の `overrides` を手編集
+3. `priority.json` の `priority`（1..5）や `weight` を手編集
+4. solver 実行時に `priority.json` が `BandAvailability.weight` へ反映される
 
 ```bash
-python -m timetable_amplify.main --generate-editable-from-csv "csv_example/8月ライブ出演可能時間フォーム（回答） - 一覧.csv" --editable-out input/generated_availability_editable.json
+# CSV -> editable + priority 生成
+python -m timetable_amplify.main \
+  --generate-editable-from-csv "csv_example/8月ライブ出演可能時間フォーム（回答） - 一覧.csv" \
+  --editable-out input/generated_availability_editable.json
+
+# priority.json の出力先/上書き制御
+python -m timetable_amplify.main \
+  --generate-editable-from-csv "csv_example/8月ライブ出演可能時間フォーム（回答） - 一覧.csv" \
+  --editable-out input/generated_availability_editable.json \
+  --priority-json input/priority.json \
+  --overwrite-priority
+
+# solver 実行（priority.json を明示指定）
+PYTHONPATH=src python -m timetable_amplify.main --config configs/default_config.json --priority-json input/priority.json
 ```
 
-### 中間ファイル（編集対象）
-- `schema_version`
-- `generated_from`
-- `grid_minutes`
-- `days[]`: day番号/ラベル/観測時台
-- `bands[]`
-  - `name`
-  - `slot_minutes`
-  - `availability_by_day_hour`（True/False）
-  - `notes_by_day`（備考原文）
-  - `overrides`（例: `[{"day": 1, "allow_until": "14:30"}]`）
+### priority.json スキーマ
+```json
+{
+  "version": 1,
+  "bands": [
+    {"band": "BandA", "priority": 5, "weight": 1.5, "notes": "絶対良い位置"},
+    {"band": "BandB", "priority": 3},
+    {"band": "BandC", "priority": 1, "notes": "どこでもOK"}
+  ]
+}
+```
+- `weight` があれば `priority` より優先。
+- `weight` がない場合の変換: `1->0.6, 2->0.8, 3->1.0, 4->1.2, 5->1.5`
+- `priority.json` が無い/不正/欠損バンドは `weight=1.0` で継続（warningのみ）。
 
 ### CSV値の正規化ルール
 - `出演可` => `true`
 - `出演不可` => `false`
 - 空欄/その他 => warning を出して `false` 扱い
 - `出演枠` は `15分枠` のような文字列から数値抽出
-
 ## 12. エラー時の確認ポイント
 1. 設定ファイルが存在するか
 2. JSON 型が正しいか

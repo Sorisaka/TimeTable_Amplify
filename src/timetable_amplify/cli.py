@@ -11,6 +11,7 @@ from .config import load_config
 from .errors import NoFeasibleSolutionError, UserVisibleError
 from .io.availability_csv_parser import parse_google_form_csv
 from .io.availability_editable import write_editable_availability
+from .io.priority_editable import write_priority_json
 from .logging_utils import setup_logging
 from .output import format_timetable_for_stdout
 from .pipeline import run_pipeline
@@ -29,7 +30,26 @@ def build_arg_parser() -> argparse.ArgumentParser:
         default="input/generated_availability_editable.json",
         help="Output path for generated editable intermediate JSON",
     )
+    parser.add_argument(
+        "--emit-priority-json",
+        action=argparse.BooleanOptionalAction,
+        default=True,
+        help="Emit priority.json alongside editable output (default: true)",
+    )
+    parser.add_argument(
+        "--priority-json",
+        help="Priority JSON path for generation/read. Default: <editable_dir>/priority.json",
+    )
+    parser.add_argument(
+        "--overwrite-priority",
+        action="store_true",
+        help="Overwrite existing priority.json during CSV->editable generation",
+    )
     return parser
+
+
+def _default_priority_path(editable_out: Path) -> Path:
+    return editable_out.parent / "priority.json"
 
 
 def main() -> int:
@@ -38,8 +58,21 @@ def main() -> int:
     try:
         if args.generate_editable_from_csv:
             parsed = parse_google_form_csv(Path(args.generate_editable_from_csv))
-            write_editable_availability(parsed, Path(args.editable_out))
-            print(f"generated editable file: {args.editable_out}")
+            editable_out = Path(args.editable_out)
+            write_editable_availability(parsed, editable_out)
+            print(f"generated editable file: {editable_out}")
+
+            if args.emit_priority_json:
+                priority_out = Path(args.priority_json) if args.priority_json else _default_priority_path(editable_out)
+                if priority_out.exists() and not args.overwrite_priority:
+                    print(
+                        f"priority json exists and was kept: {priority_out} (use --overwrite-priority to replace)",
+                        file=sys.stderr,
+                    )
+                else:
+                    write_priority_json(priority_out, [band.name for band in parsed.bands])
+                    print(f"generated priority file: {priority_out}")
+
             for warning in parsed.warnings:
                 print(f"WARNING: {warning}", file=sys.stderr)
             return 0
@@ -48,7 +81,7 @@ def main() -> int:
         setup_logging(config.logging, debug=args.debug)
         logging.getLogger(__name__).info("Starting timetable optimization")
 
-        result, artifacts = run_pipeline(args.config)
+        result, artifacts = run_pipeline(args.config, priority_json_path=args.priority_json)
         print(format_timetable_for_stdout(result))
         print(f"artifacts: {artifacts}")
         return 0

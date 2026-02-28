@@ -7,6 +7,7 @@ from pathlib import Path
 
 from .errors import CSVFormatError
 from .io.availability_editable import read_editable_availability
+from .io.priority_editable import read_priority_json
 from .models import BandAvailability, ParsedAvailability, TimeRange
 
 
@@ -46,25 +47,38 @@ def _apply_overrides(
     return adjusted, extra_unavailable
 
 
-def parse_availability_csv(path: str) -> ParsedAvailability:
+def _resolve_priority_path(editable_path: Path, priority_json_path: str | Path | None) -> Path | None:
+    if priority_json_path is None:
+        candidate = editable_path.parent / "priority.json"
+        return candidate if candidate.exists() else None
+    return Path(priority_json_path)
+
+
+def parse_availability_csv(path: str, priority_json_path: str | Path | None = None) -> ParsedAvailability:
     """Load editable availability file and convert to solver input rows."""
-    raw = read_editable_availability(Path(path))
+    editable_path = Path(path)
+    raw = read_editable_availability(editable_path)
+    resolved_priority_path = _resolve_priority_path(editable_path, priority_json_path)
+    priority_map = read_priority_json(resolved_priority_path) if resolved_priority_path is not None else {}
+
     rows: list[BandAvailability] = []
     warnings = list(raw.warnings)
 
     for b_idx, band in enumerate(raw.bands, start=1):
-        band_id_base = re.sub(r"[^a-zA-Z0-9]+", "_", band.name).strip("_").lower() or f"band{b_idx}"
+        normalized_band_name = band.name.strip()
+        band_weight = float(priority_map.get(normalized_band_name, 1.0))
+        band_id_base = re.sub(r"[^a-zA-Z0-9]+", "_", normalized_band_name).strip("_").lower() or f"band{b_idx}"
         for day, hours_map in sorted(band.availability_by_day_hour.items()):
             adjusted_hours, extra_unavailable = _apply_overrides(
                 hours_map,
                 band.overrides,
                 day,
-                f"band '{band.name}' day {day}",
+                f"band '{normalized_band_name}' day {day}",
                 warnings,
             )
             allowed_hours = sorted([hour for hour, ok in adjusted_hours.items() if ok])
             if not allowed_hours:
-                warnings.append(f"band '{band.name}' day {day}: no available hours, skipped")
+                warnings.append(f"band '{normalized_band_name}' day {day}: no available hours, skipped")
                 continue
 
             start_h = min(allowed_hours)
@@ -77,11 +91,11 @@ def parse_availability_csv(path: str) -> ParsedAvailability:
             rows.append(
                 BandAvailability(
                     band_id=f"{band_id_base}_d{day}",
-                    band_name=band.name,
+                    band_name=normalized_band_name,
                     day=str(day),
                     available=TimeRange(start=_to_hhmm(start_h), end=_to_hhmm(end_h)),
                     duration_minutes=band.slot_minutes,
-                    weight=1.0,
+                    weight=band_weight,
                     note=band.notes_by_day.get(day, ""),
                     unavailable_ranges=tuple(unavailable_ranges),
                 )
