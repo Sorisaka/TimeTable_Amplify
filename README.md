@@ -19,7 +19,6 @@ Fixstars Amplify ベースでライブのタイムテーブルを最適化する
 - `AMPLIFY_TOKEN` 未設定時の安全フォールバック
 
 ### 未対応（現時点制約）
-- Amplify SDK への厳密 BQM 投入（統合ポイントは実装済み）
 - 厳密最適化保証
 - CSV 仕様の高度化（複数候補窓や日跨ぎ精密表現）
 
@@ -71,12 +70,60 @@ source .venv/bin/activate
 pip install -e .
 ```
 
-## 6. Amplify トークン設定方法
+## 6. Amplify SDK 環境構築（任意）
+Amplify solver（`solver.client=amplify`）を使う場合のセットアップです。Fixstars Amplify SDK の Quickstart（v1系）に沿った手順で、インストール → トークン設定 → 動作確認の順で進めてください。
+
+### 6.1 Amplify SDK をインストール（PyPI）
 ```bash
+python3 -m pip install -U amplify
+# 必要に応じて追加機能つき
+python3 -m pip install -U 'amplify[extra]'
+```
+
+### 6.2 SDK のインストール確認
+```bash
+python -c "import amplify; print(amplify.__version__)"
+```
+
+### 6.3 Amplify Annealing Engine のトークン取得
+- Amplify Annealing Engine を使うには API トークンが必要です（ユーザー登録が必要）。
+- 取得導線（公式）:
+  - https://amplify.fixstars.com/
+  - https://amplify.fixstars.com/docs/en/docs/amplify-quickstart/
+  - https://amplify.fixstars.com/docs/ja/docs/amplify-quickstart/
+- 本リポジトリの挙動:
+  - `solver.client=amplify` かつ `AMPLIFY_TOKEN` 未設定で `solver.strict_optimal=false` の場合は fallback solver が実行されます。
+  - `solver.strict_optimal=true` の場合はエラー停止します。
+
+### 6.4 `AMPLIFY_TOKEN` の設定例（OS別）
+```bash
+# bash / zsh
 export AMPLIFY_TOKEN=your_token_here
 ```
-- `solver.strict_optimal=false` なら未設定でもフォールバック実行
-- `solver.strict_optimal=true` なら明示エラーで停止
+
+```powershell
+# PowerShell
+$env:AMPLIFY_TOKEN="your_token_here"
+# 永続化（新しいセッションから有効）
+setx AMPLIFY_TOKEN "your_token_here"
+```
+
+### 6.5 このプロジェクトで Amplify を使う設定
+`configs/default_config.json` の `solver` セクションで制御します。
+
+- `solver.client`: `amplify` を指定すると Amplify SDK を使用
+- `solver.timeout_ms`: Amplify クライアントの time limit（ms）
+- `solver.strict_optimal`: true の場合、SDK/トークン不備時に fallback せず停止
+
+例:
+```json
+"solver": {
+  "client": "amplify",
+  "timeout_ms": 5000,
+  "num_outputs": 1,
+  "strict_optimal": false
+}
+```
 
 ## 7. 実行方法
 ```bash
@@ -181,7 +228,7 @@ PYTHONPATH=src python -m timetable_amplify.main --config configs/default_config.
 - solver 変更時も `SolveResult` 契約を維持
 
 ## 15. 今後の拡張候補
-- Amplify BQM 正式実装
+- Amplifyモデルの制約チューニング強化
 - ブロック人数均等化の厳密QUBO化
 - 部分修復（repair）アルゴリズム
 - 重み自動チューニング
