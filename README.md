@@ -31,7 +31,9 @@ TimeTable_Amplify/
 ├── pyproject.toml
 ├── configs/
 │   ├── default_config.json
-│   └── multiday_config.json
+│   ├── multiday_config.json
+│   ├── qubo_coefficients_default.json
+│   └── qubo_coefficients_multiday.json
 ├── input/
 │   ├── example_availability_editable.json
 │   ├── example_multiday_availability_editable.json
@@ -101,7 +103,9 @@ python -m timetable_amplify.main --config configs/default_config.json --debug
 - 転換長: `event_days[].changeover_minutes`
 - ブロック価値傾斜: `reward.block_base_values`, `reward.block_step`, `reward.intra_step`
 - ブロック人数均等化重み: `reward.balance_penalty`（将来の厳密QUBO強化で利用）
-- 目的関数/制約重み: `reward.*`, `penalties.*`
+- 目的関数/制約重み: `configs/qubo_coefficients_*.json` の `reward.*`, `penalties.*`
+- priority JSONパス: `io.priority_json_path`（未指定時は editable.json 同ディレクトリの `priority.json` を探索）
+- 係数ファイルパス: `coefficients_file_path`
 
 ## 11. 出演可能時間の取り込み仕様（CSV -> 中間ファイル）
 ### 役割分離
@@ -130,6 +134,8 @@ python -m timetable_amplify.main \
 # solver 実行（priority.json を明示指定）
 PYTHONPATH=src python -m timetable_amplify.main --config configs/default_config.json --priority-json input/priority.json
 ```
+
+`config` 側でも `io.priority_json_path` を指定できます。CLI `--priority-json` はその上書きです。
 
 ### priority.json スキーマ
 ```json

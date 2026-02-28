@@ -29,10 +29,39 @@ def load_config(path: str) -> AppConfig:
     except json.JSONDecodeError as exc:
         raise ConfigError(f"Config JSON parse error at line {exc.lineno}: {exc.msg}") from exc
 
-    return _parse_config(data)
+    return _parse_config(data, config_base_dir=config_path.parent)
 
 
-def _parse_config(data: dict) -> AppConfig:
+def _load_coefficients(data: dict, config_base_dir: Path) -> tuple[dict, dict]:
+    coeff_path_raw = data.get("coefficients_file_path")
+    if coeff_path_raw is None:
+        return data["reward"], data["penalties"]
+
+    coeff_path = Path(str(coeff_path_raw))
+    if not coeff_path.is_absolute():
+        coeff_path = config_base_dir / coeff_path
+    if not coeff_path.exists():
+        raise ConfigError(f"coefficients_file_path not found: {coeff_path}")
+
+    try:
+        coeff_data = json.loads(coeff_path.read_text(encoding="utf-8"))
+    except json.JSONDecodeError as exc:
+        raise ConfigError(f"Coefficient JSON parse error at line {exc.lineno}: {exc.msg}") from exc
+    except OSError as exc:
+        raise ConfigError(f"Failed to read coefficient file: {exc}") from exc
+
+    try:
+        reward_data = coeff_data["reward"]
+        penalty_data = coeff_data["penalties"]
+    except KeyError as exc:
+        raise ConfigError(f"Coefficient file missing required key: {exc}") from exc
+
+    if not isinstance(reward_data, dict) or not isinstance(penalty_data, dict):
+        raise ConfigError("Coefficient file keys 'reward' and 'penalties' must be objects")
+    return reward_data, penalty_data
+
+
+def _parse_config(data: dict, config_base_dir: Path) -> AppConfig:
     try:
         event_days = [
             DaySpec(
@@ -47,8 +76,9 @@ def _parse_config(data: dict) -> AppConfig:
             for d in data["event_days"]
         ]
         allowed = [int(v) for v in data["allowed_durations_minutes"]]
-        reward = RewardConfig(**data["reward"])
-        penalties = PenaltyConfig(**data["penalties"])
+        reward_data, penalty_data = _load_coefficients(data, config_base_dir)
+        reward = RewardConfig(**reward_data)
+        penalties = PenaltyConfig(**penalty_data)
         solver = SolverConfig(**data["solver"])
         io = IOConfig(**data["io"])
         logging = LoggingConfig(**data["logging"])

@@ -34,25 +34,7 @@
     15,
     20
   ],
-  "reward": {
-    "block_base_values": [
-      1.0,
-      2.0,
-      3.0
-    ],
-    "block_step": 0.2,
-    "intra_step": 0.05,
-    "start_position_weight": 1.0,
-    "balance_penalty": 2.0,
-    "later_block_bonus": 0.2,
-    "min_block_slots_assumption": 20
-  },
-  "penalties": {
-    "overlap": 100.0,
-    "changeover": 80.0,
-    "out_of_window": 100.0,
-    "unavailable": 100.0
-  },
+  "coefficients_file_path": "qubo_coefficients_multiday.json",
   "solver": {
     "client": "amplify",
     "timeout_ms": 5000,
@@ -62,7 +44,8 @@
   "io": {
     "output_dir": "output",
     "output_basename": "timetable_multiday",
-    "availability_editable_path": "input/example_multiday_availability_editable.json"
+    "availability_editable_path": "input/example_multiday_availability_editable.json",
+    "priority_json_path": "input/priority.json"
   },
   "logging": {
     "level": "INFO",

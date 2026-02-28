@@ -46,6 +46,23 @@ def test_config_type_mismatch(tmp_path: Path) -> None:
         load_config(str(p))
 
 
+
+
+def test_load_config_with_external_coefficients_and_priority_path() -> None:
+    cfg = load_config("configs/default_config.json")
+    assert cfg.io.priority_json_path == "input/priority.json"
+    assert cfg.reward.block_step == 0.2
+    assert cfg.penalties.overlap == 100.0
+
+
+def test_missing_coefficients_file_raises(tmp_path: Path) -> None:
+    cfg = json.loads(Path("configs/default_config.json").read_text(encoding="utf-8"))
+    cfg["coefficients_file_path"] = "configs/not_found_coeff.json"
+    p = tmp_path / "cfg.json"
+    _write(p, json.dumps(cfg))
+    with pytest.raises(ConfigError):
+        load_config(str(p))
+
 def test_invalid_editable_json(tmp_path: Path) -> None:
     p = tmp_path / "bad.json"
     _write(p, "not-json")

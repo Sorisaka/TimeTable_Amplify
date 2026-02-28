@@ -1,0 +1,17 @@
+{
+  "reward": {
+    "block_base_values": [1.0, 2.0, 3.0],
+    "block_step": 0.2,
+    "intra_step": 0.05,
+    "start_position_weight": 1.0,
+    "balance_penalty": 2.0,
+    "later_block_bonus": 0.2,
+    "min_block_slots_assumption": 20
+  },
+  "penalties": {
+    "overlap": 100.0,
+    "changeover": 80.0,
+    "out_of_window": 100.0,
+    "unavailable": 100.0
+  }
+}

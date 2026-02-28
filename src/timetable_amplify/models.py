@@ -58,6 +58,7 @@ class IOConfig:
     availability_editable_path: str
     output_dir: str
     output_basename: str
+    priority_json_path: str | None = None
 
 
 @dataclass(frozen=True)
