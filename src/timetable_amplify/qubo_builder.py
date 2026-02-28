@@ -6,6 +6,7 @@ This module keeps optimization-specific logic isolated.
 from __future__ import annotations
 
 import importlib.util
+import logging
 import os
 from dataclasses import dataclass
 from itertools import combinations
@@ -13,6 +14,8 @@ from itertools import combinations
 from .errors import NoFeasibleSolutionError, SolverUnavailableError
 from .models import AppConfig, BandAvailability, DaySpec, ParsedAvailability, SolveResult, TimeTableEntry
 from .time_utils import duration_to_slots, parse_hhmm, slot_to_time, time_to_slot
+
+logger = logging.getLogger(__name__)
 
 
 @dataclass(frozen=True)
@@ -55,8 +58,34 @@ def build_qubo(config: AppConfig, availability: ParsedAvailability) -> QUBOModel
         if day is None:
             continue
         band_slots = duration_to_slots(band.duration_minutes, day.grid_minutes)
-        start = time_to_slot(band.available.start, day.start_time, day.grid_minutes)
-        end = time_to_slot(band.available.end, day.start_time, day.grid_minutes)
+        total_slots = duration_to_slots(parse_hhmm(day.end_time) - parse_hhmm(day.start_time), day.grid_minutes)
+        raw_start = _relative_slot(band.available.start, day)
+        raw_end = _relative_slot(band.available.end, day)
+        start = max(0, raw_start)
+        end = min(total_slots, raw_end)
+
+        if start != raw_start or end != raw_end:
+            logger.warning(
+                "Band '%s' day %s availability %s-%s exceeds config window %s-%s; using config window",
+                band.band_name,
+                day.date,
+                band.available.start,
+                band.available.end,
+                day.start_time,
+                day.end_time,
+            )
+
+        if start >= end:
+            logger.warning(
+                "Band '%s' day %s availability %s-%s is outside config window %s-%s; skipped",
+                band.band_name,
+                day.date,
+                band.available.start,
+                band.available.end,
+                day.start_time,
+                day.end_time,
+            )
+            continue
 
         for s in range(start, max(start, end - band_slots) + 1):
             bidx, pos = _slot_to_block(day, s)
@@ -312,6 +341,15 @@ def _coerce_numeric_value(value: object) -> float:
                     pass
 
     raise ValueError(f"Could not decode non-constant assignment value: {value!r}")
+
+
+def _relative_slot(time_hhmm: str, day: DaySpec) -> int:
+    delta = parse_hhmm(time_hhmm) - parse_hhmm(day.start_time)
+    if delta % day.grid_minutes != 0:
+        raise ValueError(
+            f"time {time_hhmm} is not aligned to {day.grid_minutes} minute grid for day start {day.start_time}"
+        )
+    return delta // day.grid_minutes
 
 
 def _add_quadratic(quadratic: dict[tuple[int, int], float], i: int, j: int, coeff: float) -> None:

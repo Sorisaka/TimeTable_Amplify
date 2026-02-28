@@ -20,6 +20,23 @@ def test_build_qubo_includes_constraints_terms() -> None:
     assert qubo.constant >= 0.0
 
 
+def test_build_qubo_prioritizes_config_time_window_and_logs_warning(caplog: pytest.LogCaptureFixture) -> None:
+    cfg = load_config("configs/default_config.json")
+    parsed = parse_availability_csv(cfg.io.availability_editable_path, cfg.io.priority_json_path)
+
+    narrowed_day = replace(cfg.event_days[0], start_time="12:30", end_time="15:30")
+    narrowed_cfg = replace(cfg, event_days=[narrowed_day])
+
+    with caplog.at_level("WARNING"):
+        qubo = build_qubo(narrowed_cfg, parsed)
+
+    assert "using config window" in caplog.text
+    total_slots = (15 * 60 + 30 - (12 * 60 + 30)) // narrowed_day.grid_minutes
+    for cand in qubo.candidates:
+        assert cand.start_slot >= 0
+        assert cand.end_slot <= total_slots
+
+
 class _FakePoly:
     def __init__(self, constant: float, is_constant: bool) -> None:
         self._constant = constant
