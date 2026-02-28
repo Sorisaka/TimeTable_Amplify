@@ -127,4 +127,4 @@ def test_solver_empty_result_handled() -> None:
 
     cfg = load_config("configs/default_config.json")
     with pytest.raises(NoFeasibleSolutionError):
-        solve_qubo(cfg, ParsedAvailability([], []), QUBOModel({}, {}, []))
+        solve_qubo(cfg, ParsedAvailability([], []), QUBOModel({}, {}, [], [], {}, 0.0))
